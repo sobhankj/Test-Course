@@ -18,6 +18,12 @@ class AdaptiveCruiseTest {
     private static final double MAX_ACCELERATION_STEP_KMH = 5.0;
     private static final double AMOUNT_TOLERANCE = 1.0e-6;
 
+    // update on a fresh controller, where braking is still false:
+    // distance <= emergency returns EMERGENCY_BRAKE 100,
+    // distance between emergency and safe uses proportionalBrake,
+    // distance == safe returns HOLD even when speed is below the target,
+    // distance > safe and speed < target returns ACCELERATE capped at 5,
+    // speed equal to or above the target returns HOLD 0.
     @ParameterizedTest
     @CsvSource({
             "80, 0, 100, EMERGENCY_BRAKE, 100",
@@ -42,6 +48,8 @@ class AdaptiveCruiseTest {
         assertEquals(expectedAmount, decision.amount(), AMOUNT_TOLERANCE);
     }
 
+    // update braking branch: after braking is set, a distance between safe and release
+    // stays in BRAKE and uses the fixed hysteresis pressure of 10 instead of accelerating.
     @Test
     void update_distanceBetweenSafeAndReleaseWhileBraking_keepsBrakeAtHysteresisPressure() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
@@ -53,6 +61,8 @@ class AdaptiveCruiseTest {
         assertEquals(HYSTERESIS_BRAKE_PRESSURE, decision.amount(), AMOUNT_TOLERANCE);
     }
 
+    // update braking branch: distance == safe is still below the release distance,
+    // so the hysteresis pressure of 10 is returned rather than HOLD.
     @Test
     void update_distanceAtSafeWhileBraking_keepsBrakeAtHysteresisPressure() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
@@ -64,6 +74,8 @@ class AdaptiveCruiseTest {
         assertEquals(HYSTERESIS_BRAKE_PRESSURE, decision.amount(), AMOUNT_TOLERANCE);
     }
 
+    // update: distance >= release clears the braking flag in the same call.
+    // Because speed is still below the target, that call then returns ACCELERATE by at most 5.
     @Test
     void update_distanceAtReleaseWhileBelowTarget_clearsBrakingAndAccelerates() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
@@ -75,6 +87,8 @@ class AdaptiveCruiseTest {
         assertEquals(MAX_ACCELERATION_STEP_KMH, decision.amount(), AMOUNT_TOLERANCE);
     }
 
+    // safeDistanceFor: a finite non-negative speed returns speed * 0.5 meters,
+    // including zero speed.
     @Test
     void safeDistanceFor_zeroAndRepresentativeSpeed_returnsHalfSpeedInMeters() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
@@ -83,6 +97,7 @@ class AdaptiveCruiseTest {
         assertEquals(SAFE_DISTANCE_METERS, cruise.safeDistanceFor(SPEED_KMH), AMOUNT_TOLERANCE);
     }
 
+    // safeDistanceFor -> validateSpeed: a negative, NaN, or infinite speed is rejected.
     @Test
     void safeDistanceFor_negativeOrNonFiniteSpeed_throwsIllegalArgumentException() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
@@ -92,6 +107,8 @@ class AdaptiveCruiseTest {
         assertThrows(IllegalArgumentException.class, () -> cruise.safeDistanceFor(Double.POSITIVE_INFINITY));
     }
 
+    // update -> validateSpeed: invalid speed is rejected before braking changes.
+    // A later valid update can still accelerate.
     @Test
     void update_invalidSpeed_throwsIllegalArgumentExceptionWithoutBlockingLaterUpdate() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
@@ -104,6 +121,8 @@ class AdaptiveCruiseTest {
         assertEquals(MAX_ACCELERATION_STEP_KMH, decision.amount(), AMOUNT_TOLERANCE);
     }
 
+    // update -> validateDistance: a negative or non-finite distance is rejected
+    // and leaves the existing braking flag set, so the next valid call still uses hysteresis.
     @Test
     void update_invalidDistance_throwsAndPreservesBrakingState() {
         AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);

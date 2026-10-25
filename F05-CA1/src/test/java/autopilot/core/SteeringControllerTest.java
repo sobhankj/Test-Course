@@ -17,6 +17,8 @@ class SteeringControllerTest {
     private static final double PHYSICAL_LIMIT_DEGREES = 450.0;
     private static final double ANGLE_TOLERANCE = 0.0;
 
+    // update -> moveTowardTarget: when the request is already within 60 degrees of zero,
+    // the angle jumps straight to that request in one tick.
     @ParameterizedTest
     @ValueSource(doubles = {0.0, 30.0, -45.0, 60.0, -60.0})
     void update_requestedAngleWithinOneStep_reachesRequestedAngle(double requestedAngleDegrees) {
@@ -27,6 +29,8 @@ class SteeringControllerTest {
         assertEquals(requestedAngleDegrees, actualAngle, ANGLE_TOLERANCE);
     }
 
+    // update -> moveTowardTarget: a +450 request is not reached at once.
+    // Each call adds at most +60 degrees, so two calls reach +120.
     @Test
     void update_largePositiveAngle_movesAtMostSixtyDegreesPerUpdate() {
         SteeringController controller = new SteeringController();
@@ -38,6 +42,8 @@ class SteeringControllerTest {
         assertEquals(2 * MAX_CHANGE_PER_UPDATE_DEGREES, secondAngle, ANGLE_TOLERANCE);
     }
 
+    // update -> moveTowardTarget: the same 60-degree step applies in the negative direction.
+    // A -450 request from zero produces -60 on the first call.
     @Test
     void update_largeNegativeAngle_movesAtMostSixtyDegreesPerUpdate() {
         SteeringController controller = new SteeringController();
@@ -47,6 +53,8 @@ class SteeringControllerTest {
         assertEquals(-MAX_CHANGE_PER_UPDATE_DEGREES, actualAngle, ANGLE_TOLERANCE);
     }
 
+    // update: the reduced +/-90 limit uses a strict greater-than check on 120 km/h.
+    // At exactly 120 the physical +/-450 limit still applies, so three steps reach 180.
     @Test
     void update_speedExactlyAtHighSpeedThreshold_continuesPastReducedLimit() {
         SteeringController controller = new SteeringController();
@@ -58,6 +66,8 @@ class SteeringControllerTest {
         assertEquals(3 * MAX_CHANGE_PER_UPDATE_DEGREES, actualAngle, ANGLE_TOLERANCE);
     }
 
+    // update -> clamp: above 120 km/h the target is clamped to +90.
+    // Further updates stay at +90 instead of continuing toward 450.
     @Test
     void update_speedAboveHighSpeedThreshold_stopsAtNinetyDegrees() {
         SteeringController controller = new SteeringController();
@@ -70,6 +80,8 @@ class SteeringControllerTest {
         assertEquals(HIGH_SPEED_LIMIT_DEGREES, thirdAngle, ANGLE_TOLERANCE);
     }
 
+    // update -> clamp: above 120 km/h a large negative request is clamped to -90
+    // and the wheel stops there after the 60-degree steps.
     @Test
     void update_negativeRequestAboveHighSpeed_stopsAtMinusNinetyDegrees() {
         SteeringController controller = new SteeringController();
@@ -80,6 +92,8 @@ class SteeringControllerTest {
         assertEquals(-HIGH_SPEED_LIMIT_DEGREES, actualAngle, ANGLE_TOLERANCE);
     }
 
+    // selfCenter -> moveTowardTarget: the target becomes 0, but the wheel still
+    // moves at most 60 degrees per call, from 120 to 60 and then to 0.
     @Test
     void selfCenter_fromAngleBeyondOneStep_movesTowardZeroBySixtyDegrees() {
         SteeringController controller = new SteeringController();
@@ -93,6 +107,8 @@ class SteeringControllerTest {
         assertEquals(0.0, secondCenter, ANGLE_TOLERANCE);
     }
 
+    // update -> validateAngle: NaN and infinite requests are rejected before the angle changes.
+    // A later valid update still starts from the previous 60-degree position.
     @Test
     void update_nonFiniteAngle_throwsIllegalArgumentExceptionAndKeepsAngle() {
         SteeringController controller = new SteeringController();
@@ -106,6 +122,8 @@ class SteeringControllerTest {
                 ANGLE_TOLERANCE);
     }
 
+    // update -> validateSpeed: a negative or non-finite speed is rejected before any movement.
+    // The next valid update still behaves as if the wheel is at zero.
     @Test
     void update_negativeOrNonFiniteSpeed_throwsIllegalArgumentException() {
         SteeringController controller = new SteeringController();

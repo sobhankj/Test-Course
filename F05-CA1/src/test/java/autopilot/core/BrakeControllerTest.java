@@ -36,6 +36,9 @@ class BrakeControllerTest {
         );
     }
 
+    // apply: one request on a fresh controller. Pressure at or below 80, or speed at or below 30,
+    // is returned as-is and capped at 100. Crossing both thresholds returns the first ABS pulse, 90.
+    // Warning stays off.
     @ParameterizedTest
     @MethodSource("appliedPressureCases")
     void apply_singleRequest_returnsBoundedOrFirstAbsPulse(double requestedPressure,
@@ -50,6 +53,8 @@ class BrakeControllerTest {
         assertFalse(controller.isWarningActive());
     }
 
+    // apply ABS branch: nextAbsPulseIsHigh flips on each qualifying call,
+    // so the pulses are 90, then 60, then 90 again.
     @Test
     void apply_repeatedAbsRequests_alternatesHighThenLowPulse() {
         BrakeController controller = new BrakeController();
@@ -63,6 +68,8 @@ class BrakeControllerTest {
         assertEquals(ABS_HIGH_PULSE, third, PRESSURE_TOLERANCE);
     }
 
+    // apply non-ABS branch: a request that misses the ABS condition sets the next pulse back to high,
+    // so the following ABS call returns 90 rather than 60.
     @Test
     void apply_nonAbsCallAfterAbs_resetsNextPulseToHigh() {
         BrakeController controller = new BrakeController();
@@ -74,6 +81,7 @@ class BrakeControllerTest {
         assertEquals(ABS_HIGH_PULSE, nextAbsPulse, PRESSURE_TOLERANCE);
     }
 
+    // apply -> ensureBrakingAllowed: gear P throws IllegalStateException before pressure changes.
     @Test
     void apply_park_throwsIllegalStateAndKeepsPressure() {
         BrakeController controller = new BrakeController();
@@ -87,6 +95,7 @@ class BrakeControllerTest {
         assertFalse(controller.isWarningActive());
     }
 
+    // emergencyBrake -> ensureBrakingAllowed: gear P is rejected before pressure or the warning flag changes.
     @Test
     void emergencyBrake_park_throwsIllegalStateAndKeepsPressure() {
         BrakeController controller = new BrakeController();
@@ -100,6 +109,7 @@ class BrakeControllerTest {
         assertFalse(controller.isWarningActive());
     }
 
+    // apply -> ensureBrakingAllowed: a null gear throws NullPointerException and leaves the previous pressure.
     @Test
     void apply_nullGear_throwsNullPointerExceptionAndKeepsPressure() {
         BrakeController controller = new BrakeController();
@@ -112,6 +122,7 @@ class BrakeControllerTest {
         assertEquals(NORMAL_PRESSURE, controller.getPressure(), PRESSURE_TOLERANCE);
     }
 
+    // emergencyBrake -> ensureBrakingAllowed: a null gear is rejected before pressure or warning is set.
     @Test
     void emergencyBrake_nullGear_throwsNullPointerException() {
         BrakeController controller = new BrakeController();
@@ -124,6 +135,8 @@ class BrakeControllerTest {
         assertFalse(controller.isWarningActive());
     }
 
+    // apply -> validatePressure and validateSpeed: negative or non-finite values are rejected
+    // before the stored pressure changes.
     @Test
     void apply_invalidPressureOrSpeed_throwsAndKeepsPressure() {
         BrakeController controller = new BrakeController();
@@ -139,6 +152,8 @@ class BrakeControllerTest {
         assertFalse(controller.isWarningActive());
     }
 
+    // emergencyBrake: an allowed gear sets pressure to 100, turns the warning on, and resets the ABS pulse to high.
+    // A later apply does not clear the warning.
     @Test
     void emergencyBrake_driveGear_setsFullPressureWarningAndResetsPulse() {
         BrakeController controller = new BrakeController();
