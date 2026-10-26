@@ -1,7 +1,6 @@
 package autopilot.core;
 
 import autopilot.exception.SensorFailureException;
-import autopilot.sensor.LaneSensor;
 import autopilot.sensor.ObstacleSensor;
 import autopilot.sensor.SpeedSensor;
 import org.junit.jupiter.api.Test;
