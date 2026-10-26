@@ -24,6 +24,8 @@ class AdaptiveCruiseTest {
     // distance == safe returns HOLD even when speed is below the target,
     // distance > safe and speed < target returns ACCELERATE capped at 5,
     // speed equal to or above the target returns HOLD 0.
+    // At speed 0 the safe and emergency distances are both 0, so distance 0 is an emergency
+    // and any positive distance accelerates, capped at 5.
     @ParameterizedTest
     @CsvSource({
             "80, 0, 100, EMERGENCY_BRAKE, 100",
@@ -33,7 +35,9 @@ class AdaptiveCruiseTest {
             "70, 50, 100, ACCELERATE, 5",
             "98, 60, 100, ACCELERATE, 2",
             "100, 60, 100, HOLD, 0",
-            "110, 60, 100, HOLD, 0"
+            "110, 60, 100, HOLD, 0",
+            "0, 0, 100, EMERGENCY_BRAKE, 100",
+            "0, 1, 100, ACCELERATE, 5"
     })
     void update_freshController_selectsModeAndAmount(double speedKmh,
                                                       double distanceMeters,
@@ -87,6 +91,47 @@ class AdaptiveCruiseTest {
         assertEquals(MAX_ACCELERATION_STEP_KMH, decision.amount(), AMOUNT_TOLERANCE);
     }
 
+    // update: a distance strictly above the release distance also clears braking.
+    // The same call then follows the normal rule and accelerates because 50 m is beyond
+    // the 40 m safe distance and 80 km/h is still 20 km/h below the 100 km/h target.
+    @Test
+    void update_distanceAboveReleaseWhileBelowTarget_clearsBrakingAndAccelerates() {
+        AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
+        cruise.update(SPEED_KMH, EMERGENCY_DISTANCE_METERS + 10.0);
+
+        AdaptiveCruise.Decision decision = cruise.update(SPEED_KMH, RELEASE_DISTANCE_METERS + 2.0);
+
+        assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode());
+        assertEquals(MAX_ACCELERATION_STEP_KMH, decision.amount(), AMOUNT_TOLERANCE);
+    }
+
+    // update: reaching the release distance clears braking, but acceleration also requires
+    // speed strictly below the target. At 80 km/h with an 80 km/h target the same call holds.
+    @Test
+    void update_distanceAtReleaseWhileAtTargetSpeed_clearsBrakingAndHolds() {
+        AdaptiveCruise cruise = new AdaptiveCruise(SPEED_KMH);
+        cruise.update(SPEED_KMH, EMERGENCY_DISTANCE_METERS + 10.0);
+
+        AdaptiveCruise.Decision decision = cruise.update(SPEED_KMH, RELEASE_DISTANCE_METERS);
+
+        assertEquals(AdaptiveCruise.Mode.HOLD, decision.mode());
+        assertEquals(0.0, decision.amount(), AMOUNT_TOLERANCE);
+    }
+
+    // update braking branch: once braking is set, a later distance still below the safe
+    // distance keeps the proportional pressure. It must not switch to the hysteresis value of 10.
+    // At 30 m with a 40 m safe distance the pressure is (40 - 30) / 40 * 100 = 25.
+    @Test
+    void update_distanceBelowSafeWhileBraking_keepsProportionalPressure() {
+        AdaptiveCruise cruise = new AdaptiveCruise(TARGET_SPEED_KMH);
+        cruise.update(SPEED_KMH, 30.0);
+
+        AdaptiveCruise.Decision decision = cruise.update(SPEED_KMH, 30.0);
+
+        assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode());
+        assertEquals(25.0, decision.amount(), AMOUNT_TOLERANCE);
+    }
+
     // safeDistanceFor: a finite non-negative speed returns speed * 0.5 meters,
     // including zero speed.
     @Test
@@ -105,6 +150,7 @@ class AdaptiveCruiseTest {
         assertThrows(IllegalArgumentException.class, () -> cruise.safeDistanceFor(-1.0));
         assertThrows(IllegalArgumentException.class, () -> cruise.safeDistanceFor(Double.NaN));
         assertThrows(IllegalArgumentException.class, () -> cruise.safeDistanceFor(Double.POSITIVE_INFINITY));
+        assertThrows(IllegalArgumentException.class, () -> cruise.safeDistanceFor(Double.NEGATIVE_INFINITY));
     }
 
     // update -> validateSpeed: invalid speed is rejected before braking changes.
@@ -130,9 +176,32 @@ class AdaptiveCruiseTest {
 
         assertThrows(IllegalArgumentException.class, () -> cruise.update(SPEED_KMH, -1.0));
         assertThrows(IllegalArgumentException.class, () -> cruise.update(SPEED_KMH, Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> cruise.update(SPEED_KMH, Double.POSITIVE_INFINITY));
+        assertThrows(IllegalArgumentException.class, () -> cruise.update(SPEED_KMH, Double.NEGATIVE_INFINITY));
 
         AdaptiveCruise.Decision decision = cruise.update(SPEED_KMH, (SAFE_DISTANCE_METERS + RELEASE_DISTANCE_METERS) / 2.0);
         assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode());
         assertEquals(HYSTERESIS_BRAKE_PRESSURE, decision.amount(), AMOUNT_TOLERANCE);
+    }
+
+    // constructor: a negative or non-finite target speed is rejected.
+    @Test
+    void constructor_negativeOrNonFiniteTargetSpeed_throwsIllegalArgumentException() {
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveCruise(-1.0));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveCruise(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveCruise(Double.POSITIVE_INFINITY));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveCruise(Double.NEGATIVE_INFINITY));
+    }
+
+    // constructor: zero is a valid target. With speed also zero and distance beyond the
+    // zero safe distance, speed is not below the target, so the decision is HOLD 0.
+    @Test
+    void constructor_zeroTargetSpeed_isAcceptedAndHoldsAtZeroSpeed() {
+        AdaptiveCruise cruise = new AdaptiveCruise(0.0);
+
+        AdaptiveCruise.Decision decision = cruise.update(0.0, 1.0);
+
+        assertEquals(AdaptiveCruise.Mode.HOLD, decision.mode());
+        assertEquals(0.0, decision.amount(), AMOUNT_TOLERANCE);
     }
 }
